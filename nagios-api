@@ -22,11 +22,11 @@ import sys
 import time
 import types
 import atexit
-import urllib
+import urllib.request, urllib.parse, urllib.error
 import pwd
 import grp
 from gzip import GzipFile
-from StringIO import StringIO
+from io import StringIO
 from optparse import OptionParser
 from diesel import Application, Loop, Service, sleep
 from diesel.logmod import log, levels
@@ -96,8 +96,8 @@ def http_problems(req, objid, reqobj):
         return json_error(req, 'Unexpected object ID.')
 
     hosts = {}
-    for host, host_data in NAGIOS.for_json().items():
-        for service,service_data in host_data['services'].items():
+    for host, host_data in list(NAGIOS.for_json().items()):
+        for service,service_data in list(host_data['services'].items()):
             if (int(service_data['current_state']) == 0):
                 del host_data['services'][service]
         if host_data['services']:
@@ -155,7 +155,7 @@ def http_host(req, objid, reqobj):
     global NAGIOS
     if not objid:
         return json_error(req, 'No hostname provided.')
-    elif objid not in NAGIOS.hosts.keys():
+    elif objid not in list(NAGIOS.hosts.keys()):
         return json_error(req, 'Unknown hostname.')
     ret = {}
     ret['comment'] = []
@@ -163,11 +163,11 @@ def http_host(req, objid, reqobj):
     host_keys = [ x for x in dir(NAGIOS.hosts[objid]) if not x.startswith('__') ]
     for host_key in host_keys:
         value = getattr(NAGIOS.hosts[objid], host_key)
-        if type(value) == types.StringType:
+        if type(value) == bytes:
             ret[host_key] = value
         # return comment and downtime data too, if either exists
         elif type(value) == dict:
-            for k, v in value.iteritems():
+            for k, v in value.items():
                 if isinstance( v, Comment ):
                     ret['comment'].append( v.for_json() )
                 elif isinstance( v, Downtime ):
@@ -253,7 +253,7 @@ def http_service(req, objid, reqobj):
     global NAGIOS
     if not objid:
         return json_error(req, 'No hostname provided.')
-    elif objid not in NAGIOS.services.keys():
+    elif objid not in list(NAGIOS.services.keys()):
         return json_error(req, 'Unknown hostname.')
     ret = {}
     for service in NAGIOS.services[objid]:
@@ -261,7 +261,7 @@ def http_service(req, objid, reqobj):
         service_keys = [ x for x in dir(NAGIOS.services[objid][service]) if not x.startswith('__') ]
         for service_key in service_keys:
             value = getattr(NAGIOS.services[objid][service], service_key)
-            if type(value) == types.StringType:
+            if type(value) == bytes:
                 ret[service][service_key] = value
     return json_response(req, ret)
 
@@ -500,9 +500,9 @@ def http_cancel_downtime(req, objid, reqobj):
         if obj is None:
             return json_error(req, 'Failed to get host or service for downtime.')
         if obj.service is None and services_too:
-            for svc in obj.services.itervalues():
-                dts += svc.downtimes.values()
-        dts += obj.downtimes.values()
+            for svc in obj.services.values():
+                dts += list(svc.downtimes.values())
+        dts += list(obj.downtimes.values())
 
     res = None
     for dt in dts:
@@ -896,7 +896,7 @@ def http_handler(req):
     # All requests should follow this very simple format.
     global URL_REGEX
     url = req.script_root + req.path
-    url = urllib.unquote(url).decode('utf8')
+    url = urllib.parse.unquote(url).decode('utf8')
     res = URL_REGEX.match(url)
     if res is None:
         return json_error(req, 'Invalid request URI')
@@ -970,7 +970,7 @@ def send_nagios_command(*args):
     if len(args) < 1:
         log.error('Not enough parameters to send command')
         return False
-    arg = '[%d] ' % int(time.time()) + ';'.join(unicode(j) for j in args)
+    arg = '[%d] ' % int(time.time()) + ';'.join(str(j) for j in args)
     arg = arg.encode('utf-8')
     with synchronized():
         log.info('Sending command: %s' % arg)
@@ -1002,8 +1002,8 @@ def read_status(statusfile):
         if mtime is None or stat.st_mtime > mtime:
             try:
                NAGIOS = Nagios(statusfile)
-            except ValueError,e:
-                print "You appear to have handed me a malformed status file - possibly the state retention file. Please check your arguments and try again."
+            except ValueError as e:
+                print("You appear to have handed me a malformed status file - possibly the state retention file. Please check your arguments and try again.")
                 sys.exit(-1)
             mtime = stat.st_mtime
         sleep(1)
@@ -1113,9 +1113,9 @@ def main(argv):
 def _exitfunc(*args):
     global PID_FILE
     if PID_FILE is not None and os.path.isfile(PID_FILE):
-        print "Cleaning up PID."
+        print("Cleaning up PID.")
         os.unlink(PID_FILE)
-    print "Exiting."
+    print("Exiting.")
     sys.exit(0)
 
 
